@@ -1,8 +1,11 @@
+// controllers/user.go
 package controllers
 
 import (
 	"QuizXuiz/config"
 	"QuizXuiz/models"
+	"QuizXuiz/services"
+	"QuizXuiz/utils"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )
@@ -10,13 +13,12 @@ import (
 func RegisterUser(c *gin.Context) {
 	var user models.User
 	if err := c.ShouldBindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request")
 		return
 	}
 
-	// Save user in DB
-	if result := config.DB.Create(&user); result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+	if err := config.DB.Create(&user).Error; err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to register user")
 		return
 	}
 
@@ -24,6 +26,39 @@ func RegisterUser(c *gin.Context) {
 }
 
 func LoginUser(c *gin.Context) {
-	// Placeholder login functionality for now
-	c.JSON(http.StatusOK, gin.H{"message": "Login not implemented yet"})
+	var req struct{ Email, Password string }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request")
+		return
+	}
+
+	var user models.User
+	if err := config.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid credentials")
+		return
+	}
+
+	if err := services.VerifyPassword(user.Password, req.Password); err != nil {
+		utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid credentials")
+		return
+	}
+
+	token, err := services.GenerateJWT(user.ID, config.LoadConfig().JWTSecret)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to generate token")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+func GetUserProfile(c *gin.Context) {
+	userID := c.MustGet("userID").(uint)
+	var user models.User
+	if err := config.DB.First(&user, userID).Error; err != nil {
+		utils.ErrorResponse(c, http.StatusNotFound, "User not found")
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
 }
